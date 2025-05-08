@@ -42,7 +42,7 @@ waybar
 grim
 wl-clipboard
 swaybg
-ly
+hyprlock
 
 #######################
 #    User specific    #
@@ -53,7 +53,7 @@ docker
 dsniff
 edk2-ovmf
 exa
-firefox
+chromium
 fzf
 git
 gnu-netcat
@@ -75,7 +75,6 @@ net-tools
 newsboat
 nmap
 nodejs
-ranger
 reflector
 rsync
 stow
