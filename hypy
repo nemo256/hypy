@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+
+# Prompt to gather data
+function prompt {
+    local message=$1
+    local variable=$2
+    local default=$3
+    tput setaf 15
+    read -p "${message} (default: ${default}): " value
+    tput sgr0
+    eval $variable=${value:-$default}
+}
+
+# Cool logo message
+function logo() {
+    local text=$1
+    local blue=$(tput setaf 4; tput bold)
+    local indigo=$(tput setaf 5; tput bold)
+    local text_color=$(tput bold)
+    local screen_width=$(tput cols)
+    local logo="
+ _          _ _       
+| |__   ___| | | ___  
+| '_ \ / __| | |/ _ \ 
+| | | | (__| | | (_) |
+|_| |_| \___|_|_|\___/
+"
+    local logo_width=$(echo "$logo" | awk '{ if (length > max) max = length } END { print max }')
+    clear
+    IFS=$'\n'
+    printf "\n"
+    for line in $logo
+    do
+        printf "%*s%s\n" $((($screen_width - ${#line} - 1) / 2)) "" "$indigo$line"
+    done
+    printf "\n%*s%s%s%*s\n\n" $((($screen_width - ${#text} - 1) / 2)) "" "$blue" "$text" $((($screen_width + ${#text} + ${#text} - $logo_width) / 2)) ""
+    tput sgr0
+}
+
+logo "Press any key to continue..."
+read
+
+# Information gathering
+prompt "Shell" SHELL /bin/zsh
+prompt "Keymap" KEYMAP us
+prompt "Console font" CONSOLE_FONT ter-132b
+prompt "IRSSI username" IRSSI_USERNAME "None"
+prompt "IRSSI password" IRSSI_PASSWORD "None"
+prompt "Github token (optional)" TOKEN "None"
+
+select AUR_HELPER in "Paru" "Yay"; do
+    case $AUR_HELPER in
+        "") AUR_HELPER="paru-bin"; break;;
+        "Paru") AUR_HELPER="paru-bin"; break;;
+        "Yay") AUR_HELPER="yay-bin"; break;;
+    esac
+done
+
+if [[ ! -f "packages" ]]; then
+  logo "Error: packages file not found!"
+  exit 1
+fi
+
+logo "Sync repos..."
+sudo pacman -Syy
+
+while read package
+do
+  if [[ $package == "" ]] || [[ $package == \#* ]]; then
+    continue
+  fi
+  logo "Installing: $package..."
+  sudo pacman -S --noconfirm --needed "$package" 2> /dev/null
+done < packages
+
+logo "Installing an AUR helper: ${AUR_HELPER}..."
+git clone https://aur.archlinux.org/${AUR_HELPER}.git
+cd ${AUR_HELPER}
+makepkg -si --noconfirm
+cd ..
+rm -rf ${AUR_HELPER}
+
+# Install ly from AUR
+logo "Installing ly from AUR..."
+${AUR_HELPER} -S --noconfirm ly
+
+logo "Switch shell to '${SHELL}'..."
+sudo chsh -s ${SHELL} root 1> /dev/null
+sudo chsh -s ${SHELL} ${USER} 1> /dev/null
+
+logo "Changing default console font..."
+echo -ne "KEYMAP=\"$KEYMAP\"\nFONT=\"$CONSOLE_FONT\"\n" | sudo tee /etc/vconsole.conf 1> /dev/null
+
+logo "Adding no password sudo rights..."
+sudo sed -ni "/^root/{a\
+  ${USER} ALL=(ALL:ALL) NOPASSWD: ALL
+p}" /etc/sudoers
+
+logo "Adding yamete kudasai sound on usb mount / unmount..."
+echo -ne "KERNEL==\"sd*\", SUBSYSTEM==\"block\", ENV{DEVTYPE}==\"partition\", ACTION==\"add\", ENV{ID_FS_TYPE}!=\"vfat\", ENV{ID_FS_USAGE}==\"filesystem\", RUN+=\"/bin/aplay $HOME/bin/sound/yamete.wav\"\nKERNEL==\"sd*\", SUBSYSTEM==\"block\", ENV{DEVTYPE}==\"partition\", ACTION==\"remove\", ENV{ID_FS_TYPE}!=\"vfat\", ENV{ID_FS_USAGE}==\"filesystem\", RUN+=\"/bin/aplay $HOME/bin/sound/ahh.wav\"\n" | sudo tee /etc/udev/rules.d/99-usb-sound.rules >/dev/null
+sudo udevadm control --reload-rules
+
+logo "Automount my usb drive..."
+sudo echo -ne "UUID=CA18-653E /mnt vfat noauto,nofail,x-systemd.automount,x-systemd.idle-timeout=2,x-systemd.device-timeout=2" | sudo tee -a /etc/fstab 1> /dev/null
+sudo systemctl daemon-reload && sudo systemctl restart local-fs.target
+
+logo "Github configuration..."
+if [ -n "$TOKEN" ]; then
+  cd ${HOME} 1> /dev/null
+  echo -ne "https://nemo256:${TOKEN}@github.com" > ${HOME}/.git-credentials
+  git config --global credential.helper store 1> /dev/null
+fi
+
+logo "Font configuration..."
+cd /usr/share/fonts 1> /dev/null
+sudo curl -fLo "Fira Code Bold Nerd Font Complete.ttf" https://github.com/ryanoasis/nerd-fonts/raw/HEAD/patched-fonts/FiraCode/Bold/complete/Fira%20Code%20Bold%20Nerd%20Font%20Complete.ttf 1> /dev/null
+sudo fc-cache -fv 1> /dev/null
+cd ${HOME} 1> /dev/null
+
+logo "Cloning Hypy repo..."
+git clone https://github.com/nemo256/Hypy.git ${HOME}/Hypy
+
+# Assuming the repo has configuration files to be stowed
+cd ${HOME}/Hypy
+stow -t ${HOME} .
+
+logo "Irssi configuration..."
+cp -fvr ${HOME}/Hypy/config/irssi/.irssi ${HOME}
+sed -i "s/sasl_username = \".*\"/sasl_username = \"$IRSSI_USERNAME\"/" "${HOME}/.irssi/config"
+sed -i "s/sasl_password = \".*\"/sasl_password = \"$IRSSI_PASSWORD\"/" "${HOME}/.irssi/config"
+sed -i "s/nick = \".*\"/nick = \"$IRSSI_USERNAME\"/" "${HOME}/.irssi/config"
+
+logo "Make binary files executable..."
+chmod -R 755 ${HOME}/bin 1> /dev/null
+
+logo "Vimy configuration..."
+git clone https://github.com/nemo256/vimy \
+  ${HOME}/.config/nvim 1> /dev/null
+git clone --depth 1 https://github.com/wbthomason/packer.nvim \
+  ${HOME}/.local/share/nvim/site/pack/packer/start/packer.nvim 1> /dev/null
+nvim --headless -c 'autocmd User PackerComplete quitall' -c 'PackerSync' 1> /dev/null
+mkdir ${HOME}/.config/nvim/session 1> /dev/null
+
+logo "Ranger Configuration..."
+git clone https://github.com/alexanderjeurissen/ranger_devicons \
+  ${HOME}/.config/ranger/plugins/ranger_devicons 1> /dev/null
+cd ${HOME}/.config/ranger/plugins/ranger_devicons/ 1> /dev/null
+python -m devicons 1> /dev/null
+cd ${HOME} 1> /dev/null
+
+logo "Protonvpn configuration..."
+${AUR_HELPER} -S --noconfirm protonvpn-cli
+protonvpn-cli config --vpn-accelerator enable
+
+logo "Managing Essential Services..."
+sudo systemctl disable transmission.service
+sudo systemctl enable bluetooth.service
+sudo systemctl enable ly
+
+logo "Setting up disable_prochot.service..."
+sudo echo -ne "[Unit]\nDescription=Disable BD_PROCHOT to enable better performance without the battery\nAfter=network.target\n\n[Service]\nType=simple\nUser=root\nExecStart=wrmsr 0x1FC 2\n\n[Install]\nWantedBy=default.target" | sudo tee /etc/systemd/system/disable_prochot.service
+sudo systemctl enable disable_prochot.service
+
+logo "Done - Script finished installing and configuring n3m0's Hypy!"
