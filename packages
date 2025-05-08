@@ -35,13 +35,12 @@ hyprland
 wayland
 wayland-protocols
 xdg-desktop-portal-hyprland
-kitty
+foot
 wofi
 mako
-waybar
 grim
 wl-clipboard
-swaybg
+hyprpaper
 hyprlock
 
 #######################
@@ -97,12 +96,12 @@ zsh
 #######################
 #        Fonts        #
 #######################
-noto-fonts
-noto-fonts-cjk
-noto-fonts-extra
-terminus-font
-ttf-fira-code
-ttf-nerd-fonts-symbols-2048-em
+# noto-fonts
+# noto-fonts-cjk
+# noto-fonts-extra
+# terminus-font
+# ttf-fira-code
+# ttf-nerd-fonts-symbols-2048-em
 
 #######################
 #       Drivers       #

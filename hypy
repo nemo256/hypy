@@ -92,27 +92,45 @@ if [ -n "$TOKEN" ]; then
   git config --global credential.helper store 1> /dev/null
 fi
 
-logo "Font configuration..."
-cd /usr/share/fonts 1> /dev/null
-sudo curl -fLo "Fira Code Bold Nerd Font Complete.ttf" https://github.com/ryanoasis/nerd-fonts/raw/HEAD/patched-fonts/FiraCode/Bold/complete/Fira%20Code%20Bold%20Nerd%20Font%20Complete.ttf 1> /dev/null
-sudo fc-cache -fv 1> /dev/null
-cd ${HOME} 1> /dev/null
-
 logo "Cloning Hypy repo..."
 git clone https://github.com/nemo256/Hypy.git ${HOME}/Hypy
 
-# Assuming the repo has configuration files to be stowed
+# Stow configuration files
+logo "Stowing configuration files..."
 cd ${HOME}/Hypy
-stow -t ${HOME} .
+if [[ -d "config" ]]; then
+  stow -t ${HOME} config 2>> ${HOME}/hypy_install.log
+else
+  logo "Warning: No config directory found in Hypy repo, creating minimal Hyprland config..."
+  mkdir -p ${HOME}/.config/hypr
+  cat << EOF > ${HOME}/.config/hypr/hyprland.conf
+# Minimal Hyprland configuration
+monitor=,preferred,auto,1
+exec-once=foot
+input {
+    kb_layout=us
+}
+binds {
+    bind=SUPER,T,exec,foot
+    bind=SUPER,Q,exec,killall -s SIGTERM .*_wrapped
+}
+EOF
+fi
 
 logo "Irssi configuration..."
-cp -fvr ${HOME}/Hypy/config/irssi/.irssi ${HOME}
-sed -i "s/sasl_username = \".*\"/sasl_username = \"$IRSSI_USERNAME\"/" "${HOME}/.irssi/config"
-sed -i "s/sasl_password = \".*\"/sasl_password = \"$IRSSI_PASSWORD\"/" "${HOME}/.irssi/config"
-sed -i "s/nick = \".*\"/nick = \"$IRSSI_USERNAME\"/" "${HOME}/.irssi/config"
+if [[ -d ${HOME}/Hypy/config/irssi ]]; then
+  cp -fvr ${HOME}/Hypy/config/irssi/.irssi ${HOME}
+  sed -i "s/sasl_username = \".*\"/sasl_username = \"$IRSSI_USERNAME\"/" "${HOME}/.irssi/config"
+  sed -i "s/sasl_password = \".*\"/sasl_password = \"$IRSSI_PASSWORD\"/" "${HOME}/.irssi/config"
+  sed -i "s/nick = \".*\"/nick = \"$IRSSI_USERNAME\"/" "${HOME}/.irssi/config"
+else
+  logo "Warning: IRSSI config not found in Hypy repo, skipping..."
+fi
 
 logo "Make binary files executable..."
-chmod -R 755 ${HOME}/bin 1> /dev/null
+if [[ -d ${HOME}/bin ]]; then
+  chmod -R 755 ${HOME}/bin 1> /dev/null
+fi
 
 logo "Protonvpn configuration..."
 ${AUR_HELPER} -S --noconfirm protonvpn-cli
@@ -125,5 +143,17 @@ sudo systemctl enable bluetooth.service
 logo "Setting up disable_prochot.service..."
 sudo echo -ne "[Unit]\nDescription=Disable BD_PROCHOT to enable better performance without the battery\nAfter=network.target\n\n[Service]\nType=simple\nUser=root\nExecStart=wrmsr 0x1FC 2\n\n[Install]\nWantedBy=default.target" | sudo tee /etc/systemd/system/disable_prochot.service
 sudo systemctl enable disable_prochot.service
+
+logo "Verifying Hyprland configuration..."
+if command -v hyprctl >/dev/null 2>&1; then
+  hyprctl version >> ${HOME}/hypy_install.log 2>&1
+  if [[ -f ${HOME}/.config/hypr/hyprland.conf ]]; then
+    logo "Hyprland config found, ready to launch!"
+  else
+    logo "No Hyprland config found, using minimal config..."
+  fi
+else
+  logo "Warning: Hyprland not installed correctly, check logs!"
+fi
 
 logo "Done - Script finished installing and configuring n3m0's Hypy!"
