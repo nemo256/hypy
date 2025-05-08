@@ -63,15 +63,47 @@ do
     continue
   fi
   logo "Installing: $package..."
-  sudo pacman -S --noconfirm --needed "$package" 2> /dev/null
+  sudo pacman -S --noconfirm --needed "$package" 2>> ${HOME}/hypy_install.log || {
+    logo "Warning: Failed to install $package, continuing..."
+    echo "Failed to install $package" >> ${HOME}/hypy_install.log
+  }
 done < packages
 
 logo "Installing an AUR helper: ${AUR_HELPER}..."
 git clone https://aur.archlinux.org/${AUR_HELPER}.git
 cd ${AUR_HELPER}
-makepkg -si --noconfirm
+makepkg -si --noconfirm 2>> ${HOME}/hypy_install.log || {
+  logo "Warning: Failed to install $AUR_HELPER, continuing..."
+  echo "Failed to install $AUR_HELPER" >> ${HOME}/hypy_install.log
+}
 cd ..
 rm -rf ${AUR_HELPER}
+
+logo "Checking critical dependencies..."
+for pkg in mesa libglvnd libva-intel-driver vulkan-intel wayland hyprland; do
+  if pacman -Qs $pkg > /dev/null; then
+    echo "$pkg: Installed" >> ${HOME}/hypy_install.log
+  else
+    logo "Warning: $pkg not installed, attempting to install..."
+    sudo pacman -S --noconfirm --needed $pkg 2>> ${HOME}/hypy_install.log || echo "Failed to install $pkg" >> ${HOME}/hypy_install.log
+  fi
+done
+
+logo "Validating GPU drivers..."
+if command -v glxinfo >/dev/null; then
+  glxinfo -B >> ${HOME}/hypy_install.log 2>&1
+else
+  logo "Installing mesa-utils for GPU validation..."
+  sudo pacman -S --noconfirm --needed mesa-utils 2>> ${HOME}/hypy_install.log
+  glxinfo -B >> ${HOME}/hypy_install.log 2>&1
+fi
+if command -v vulkaninfo >/dev/null; then
+  vulkaninfo --summary >> ${HOME}/hypy_install.log 2>&1
+else
+  logo "Installing vulkan-tools for Vulkan validation..."
+  sudo pacman -S --noconfirm --needed vulkan-tools 2>> ${HOME}/hypy_install.log
+  vulkaninfo --summary >> ${HOME}/hypy_install.log 2>&1
+fi
 
 logo "Switch shell to '${SHELL}'..."
 sudo chsh -s ${SHELL} root 1> /dev/null
@@ -93,15 +125,28 @@ if [ -n "$TOKEN" ]; then
 fi
 
 logo "Cloning Hypy repo..."
-git clone https://github.com/nemo256/Hypy.git ${HOME}/Hypy
+git clone https://github.com/nemo256/Hypy.git ${HOME}/Hypy 2>> ${HOME}/hypy_install.log
 
 # Stow configuration files
 logo "Stowing configuration files..."
 cd ${HOME}/Hypy
 if [[ -d "config" ]]; then
-  stow -t ${HOME} config 2>> ${HOME}/hypy_install.log
+  stow -t ${HOME} config 2>> ${HOME}/hypy_install.log || {
+    logo "Warning: Failed to stow configurations, creating minimal Hyprland config..."
+    mkdir -p ${HOME}/.config/hypr
+    cat << EOF > ${HOME}/.config/hypr/hyprland.conf
+# Minimal Hyprland configuration
+monitor=,preferred,auto,1
+exec-once=foot
+input {
+    kb_layout=us
+}
+bind=SUPER,T,exec,foot
+bind=SUPER,Q,exec,killall -s SIGTERM .*_wrapped
+EOF
+  }
 else
-  logo "Warning: No config directory found in Hypy repo, creating minimal Hyprland config..."
+  logo "No config directory found in Hypy repo, creating minimal Hyprland config..."
   mkdir -p ${HOME}/.config/hypr
   cat << EOF > ${HOME}/.config/hypr/hyprland.conf
 # Minimal Hyprland configuration
@@ -110,50 +155,63 @@ exec-once=foot
 input {
     kb_layout=us
 }
-binds {
-    bind=SUPER,T,exec,foot
-    bind=SUPER,Q,exec,killall -s SIGTERM .*_wrapped
-}
+bind=SUPER,T,exec,foot
+bind=SUPER,Q,exec,killall -s SIGTERM .*_wrapped
 EOF
 fi
 
 logo "Irssi configuration..."
 if [[ -d ${HOME}/Hypy/config/irssi ]]; then
-  cp -fvr ${HOME}/Hypy/config/irssi/.irssi ${HOME}
-  sed -i "s/sasl_username = \".*\"/sasl_username = \"$IRSSI_USERNAME\"/" "${HOME}/.irssi/config"
-  sed -i "s/sasl_password = \".*\"/sasl_password = \"$IRSSI_PASSWORD\"/" "${HOME}/.irssi/config"
-  sed -i "s/nick = \".*\"/nick = \"$IRSSI_USERNAME\"/" "${HOME}/.irssi/config"
+  cp -fvr ${HOME}/Hypy/config/irssi/.irssi ${HOME} 2>> ${HOME}/hypy_install.log
+  sed -i "s/sasl_username = \".*\"/sasl_username = \"$IRSSI_USERNAME\"/" "${HOME}/.irssi/config" 2>> ${HOME}/hypy_install.log
+  sed -i "s/sasl_password = \".*\"/sasl_password = \"$IRSSI_PASSWORD\"/" "${HOME}/.irssi/config" 2>> ${HOME}/hypy_install.log
+  sed -i "s/nick = \".*\"/nick = \"$IRSSI_USERNAME\"/" "${HOME}/.irssi/config" 2>> ${HOME}/hypy_install.log
 else
   logo "Warning: IRSSI config not found in Hypy repo, skipping..."
 fi
 
 logo "Make binary files executable..."
 if [[ -d ${HOME}/bin ]]; then
-  chmod -R 755 ${HOME}/bin 1> /dev/null
+  chmod -R 755 ${HOME}/bin 1>> ${HOME}/hypy_install.log
 fi
 
 logo "Protonvpn configuration..."
-${AUR_HELPER} -S --noconfirm protonvpn-cli
-protonvpn-cli config --vpn-accelerator enable
+${AUR_HELPER} -S --noconfirm protonvpn-cli 2>> ${HOME}/hypy_install.log || {
+  logo "Warning: Failed to install protonvpn-cli, continuing..."
+}
+protonvpn-cli config --vpn-accelerator enable 2>> ${HOME}/hypy_install.log
 
 logo "Managing Essential Services..."
-sudo systemctl disable transmission.service
-sudo systemctl enable bluetooth.service
+sudo systemctl disable transmission.service 2>> ${HOME}/hypy_install.log
+sudo systemctl enable bluetooth.service 2>> ${HOME}/hypy_install.log
 
 logo "Setting up disable_prochot.service..."
 sudo echo -ne "[Unit]\nDescription=Disable BD_PROCHOT to enable better performance without the battery\nAfter=network.target\n\n[Service]\nType=simple\nUser=root\nExecStart=wrmsr 0x1FC 2\n\n[Install]\nWantedBy=default.target" | sudo tee /etc/systemd/system/disable_prochot.service
-sudo systemctl enable disable_prochot.service
+sudo systemctl enable disable_prochot.service 2>> ${HOME}/hypy_install.log
 
-logo "Verifying Hyprland configuration..."
+logo "Setting Wayland environment..."
+echo -e "export XDG_SESSION_TYPE=wayland\nexport QT_QPA_PLATFORM=wayland" >> ${HOME}/.zshrc
+
+logo "Verifying Hyprland installation..."
 if command -v hyprctl >/dev/null 2>&1; then
   hyprctl version >> ${HOME}/hypy_install.log 2>&1
   if [[ -f ${HOME}/.config/hypr/hyprland.conf ]]; then
-    logo "Hyprland config found, ready to launch!"
+    logo "Hyprland config found, attempting to launch in debug mode..."
+    Hyprland --verbose >> ${HOME}/hypy_install.log 2>&1 &
+    sleep 2
+    if pgrep Hyprland > /dev/null; then
+      logo "Hyprland launched successfully!"
+      killall Hyprland
+    else
+      logo "Hyprland failed to launch, check ~/hypy_install.log for details!"
+    fi
   else
     logo "No Hyprland config found, using minimal config..."
   fi
 else
-  logo "Warning: Hyprland not installed correctly, check logs!"
+  logo "Error: Hyprland not installed correctly, check logs!"
+  exit 1
 fi
 
 logo "Done - Script finished installing and configuring n3m0's Hypy!"
+echo "To launch Hyprland, run 'Hyprland' from a terminal." >> ${HOME}/hypy_install.log

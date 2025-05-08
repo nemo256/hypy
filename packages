@@ -27,6 +27,8 @@ squashfs-tools
 tcpdump
 usbutils
 wireless_tools
+mesa
+libglvnd
 
 #######################
 # Wayland and Hyprland#
